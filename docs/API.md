@@ -73,6 +73,20 @@ Permanently destroys the signal and clears all internal references.
 signal:Destroy()
 ```
 
+#### `Signal:GetConnectionCount(): number`
+Returns the total number of active connections to the signal.
+```lua
+print(signal:GetConnectionCount())
+```
+
+#### `Signal:IsDestroyed(): boolean`
+Checks whether the signal has been destroyed.
+```lua
+if signal:IsDestroyed() then
+    warn("Signal is no longer available")
+end
+```
+
 ---
 
 ## `Connection<T...>`
