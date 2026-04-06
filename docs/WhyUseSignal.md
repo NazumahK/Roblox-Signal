@@ -1,53 +1,65 @@
-# Technical Whitepaper: Advanced Signal Architecture for Luau
+# Technical Architecture
 
-## Abstract
+This document providing a summary of the design decisions and optimizations for this Signal implementation.
 
-Event-driven programming is central to Roblox engine development. While the native `RBXScriptSignal` is highly optimized, it lacks the flexibility and strict typing required for complex, high-reliability game frameworks. This document outlines the architectural decisions and performance optimizations behind this custom Signal implementation, emphasizing $O(1)$ disconnection, coroutine reuse, and variadic type safety.
+## 1. Disconnection: O(1) Complexity
 
-## 1. Algorithmic Efficiency: Doubly Linked List Architecture
+Standard arrays or single-linked lists require $O(N)$ time to find and remove a connection. This library uses a **Doubly Linked List**. Each `Connection` object stores `_prev` and `_next` references, allowing a connection to remove itself from the signal without any list traversal.
 
-Traditional signal implementations often utilize a standard array or single-linked list to manage connections. However, these structures present an $O(n)$ time complexity for disconnection, as the list must be traversed to locate and remove a specific handler.
+```lua
+-- Conceptual DLL disconnection
+-- O(1) - immediate removal of node
+if prev then
+    prev._next = next
+else
+    signal._handlerListHead = next
+end
+if next then
+    next._prev = prev
+end
+```
 
-### 1.1 The O(1) Disconnection Protocol
+## 2. Resource Management: Coroutine Pooling
 
-By implementing a **Doubly Linked List (DLL)** for handler management, each `Connection` object maintains pointers to both its preceding (`_prev`) and succeeding (`_next`) nodes. When `Connection:Disconnect()` is invoked, the node can decouple itself from the chain without traversing the list from its head.
+Allocating a new thread for every event fire increases memory pressure and GC frequency. A module-level thread cache (`freeRunnerThread`) is maintained. Handlers are executed within a pooled thread that is yielded and reused.
 
-This architectural shift ensures that disconnection remains a constant time operation, regardless of the number of active connections. This is particularly critical in systems with high-frequency event subscriptions and unsubscriptions, such as dynamic UI components or entity-component systems.
+```lua
+-- Coroutine reuse pattern
+local function handle()
+    while true do
+        handler_fn(coroutine.yield()) -- reuse thread
+    end
+end
+```
 
-## 2. Resource Management: Coroutine Pooling and Reuse
+## 3. Type Safety: Variadic Generics
 
-Allocating a new thread (coroutine) for every event fired is a computationally expensive operation that induces memory pressure and increases garbage collection frequency.
+The signal is built using Luau's variadic generics (`Signal<T...>`). This ensures that parameters passed to `Connect`, `Once`, `Fire`, and `FireDeferred` are statically verified.
 
-### 2.1 Context Switching and Yielding
+```lua
+local mySignal = Signal.new<string, number>()
 
-This Signal implementation utilizes a **per-module thread cache**. When `Signal:Fire` is called, a thread is acquired from the `freeRunnerThread` cache. If no thread is available, a new one is created.
+mySignal:Connect(function(msg, val)
+    -- IDE knows msg is string, val is number
+end)
 
-The runner thread operates in an infinite loop:
-1.  Receives a handler function and its arguments via `coroutine.yield`.
-2.  Executes the task.
-3.  Resubmits itself to the module's `freeRunnerThread` cache upon completion.
+mySignal:Fire("Hello", 100) -- OK
+mySignal:Fire(true, 10)     -- Static Type Error!
+```
 
-This mechanism significantly reduces the overhead of thread creation, allowing the system to handle thousands of events per frame with negligible impact on the CPU frame budget.
+## 4. Memory Safety
 
-## 3. Structural Robustness: Variadic Generic Type Safety
+All internal references (`_fn`, `_signal`, `_next`, `_prev`) are explicitly set to `nil` when a connection is severed or a signal is destroyed. This prevents circular references and ensures that captured closures are correctly released.
 
-Luau's type system provides a unique advantage over standard Lua through **Variadic Generics ($T...$)**.
+```lua
+function Connection:Disconnect()
+    self.Connected = false
+    -- Crucial for GC:
+    self._fn = nil
+    self._signal = nil
+end
+```
 
-### 3.1 Static Verification and IntelliSense
+## Summary
 
-The Signal class is defined with a variadic generic parameter: `Signal<T...>`. This design ensures that every argument passed to `Fire` or `FireDeferred` matches the signature expected by the connected handlers.
-
-*   **Compile-time Check**: Errors are caught during development in the Luau type checker rather than at runtime.
-*   **IDE Support**: Autocompletion (IntelliSense) correctly identifies the parameter types for handlers, improving developer productivity and reducing API misuse.
-
-## 4. Defensive Memory Safety: Reference Nulling
-
-Standard event handlers often create closures that capture references to their parent signals or objects, potentially leading to hard-to-debug memory leaks.
-
-### 4.1 Post-Disconnection Lifecycle
-
-When a connection is severed, the internal `_fn` and `_signal` pointers are explicitly set to `nil`. This action breaks the references that could otherwise prevent the signal or the handler's closure from being garbage collected. This defensive approach ensures a clean memory footprint for long-running sessions.
-
-## 5. Conclusion
-
-This Signal implementation provides a rigorous, performance-oriented framework for Luau event management. Its combination of $O(1)$ algorithmic efficiency, advanced coroutine pooling, and strict variadic typing makes it an ideal candidate for professional-grade project architectures that require stability and high throughput.
+This Signal implementation focuses on predictable algorithmic performance and robust memory management while providing full Luau type safety.

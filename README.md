@@ -1,71 +1,48 @@
-# Signal: A High-Performance, Type-Safe Luau Implementation
+# Signal
 
-Signal is a robust, highly optimized event-driven communication library for the Roblox engine and Luau environments. It is designed to provide a high-fidelity alternative to the native `RBXScriptSignal`, with a focus on maximum throughput, minimal memory overhead, and strict type safety through variadic generics.
+A high-performance, type-safe signal library for Luau.
 
-## Core Philosophical Principles
+## Features
 
-1.  **High Throughput**: By utilizing advanced coroutine pooled management, Signal minimizes the overhead associated with thread allocation, ensuring event firing remains a sub-microsecond operation.
-2.  **Structural Integrity**: Leveraging a doubly linked list architecture for connection management, providing $O(1)$ time complexity for both registration and deregistration operations.
-3.  **Type Determinism**: Built with Luau's variadic generic system, Signal ensures compile-time type checking for all event arguments, significantly reducing runtime errors and improving IDE IntelliSense.
-4.  **Defensive Memory Management**: Rigorous reference clearing protocols ensure that once a signal is destroyed or a connection is severed, all internal references to handlers and parent signals are immediately eligible for garbage collection.
-
-## Technical Specifications
-
-| Feature | Specification |
-| :--- | :--- |
-| **Language** | Luau (Strict Mode) |
-| **Data Structure** | Doubly Linked List (DLL) |
-| **Execution Model** | Immediate & Deferred (task.defer/task.spawn) |
-| **Complexity (Disconnect)** | $O(1)$ |
-| **Thread Management** | Coroutine Pooling (Reuse) |
-| **Type Support** | Variadic Generics ($T...$) |
+- **Variadic Generics**: Full Luau type safety for event arguments.
+- **O(1) Disconnect**: Doubly linked list for constant-time connection removal.
+- **Thread Pooling**: Reuse coroutines to minimize overhead.
+- **Modern APIs**: Supports `Once`, `WaitTimeout`, and `FireDeferred`.
+- **Memory Safe**: Explicit reference clearing to prevent leaks.
 
 ## Installation
 
-### Wally (Recommended)
-
-Add the following to your `wally.toml` file:
+Add to your `wally.toml`:
 
 ```toml
 [dependencies]
 Signal = "nazumahk/signal@1.0.0"
 ```
 
-## Quick Start Guide
-
-The following example demonstrates a standard lifecycle for a Signal instance within a Luau environment.
+## Quick Start
 
 ```lua
 local Signal = require(path.to.Signal)
 
--- Initializing a signal with type-safe arguments (string and number)
-local onScoreUpdate = Signal.new<string, number>()
+local signal = Signal.new<string, number>()
 
--- Subscribing to events
-local connection = onScoreUpdate:Connect(function(playerName: string, newScore: number)
-    print(string.format("Player %s updated score to %d", playerName, newScore))
+-- Connect
+local connection = signal:Connect(function(msg, val)
+    print(msg, val)
 end)
 
--- Firing the signal immediately
-onScoreUpdate:Fire("Alpha", 500)
+-- Fire
+signal:Fire("Hello", 100)
+signal:FireDeferred("World", 200)
 
--- Firing the signal deferred (Modern Roblox Standard)
-onScoreUpdate:FireDeferred("Beta", 750)
-
--- Severing the connection
+-- Disconnect & Destroy
 connection:Disconnect()
-
--- Explicit object destruction
-onScoreUpdate:Destroy()
+signal:Destroy()
 ```
 
-## Documentation
-
-For a comprehensive technical analysis and API specification, please refer to the following documents:
-
-*   [Technical Whitepaper: Why Use Signal?](docs/WhyUseSignal.md)
-*   [API Specification and Reference](docs/API.md)
+## Docs
+- [Technical Details](docs/WhyUseSignal.md)
+- [API Reference](docs/API.md)
 
 ## License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for the full license text.
+MIT
