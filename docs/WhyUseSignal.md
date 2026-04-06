@@ -1,65 +1,44 @@
-# Technical Architecture
+# Why Use Signal?
 
-This document providing a summary of the design decisions and optimizations for this Signal implementation.
+This document outlines the practical benefits of implementing a custom Signal library over native alternatives or simpler event systems.
 
-## 1. Disconnection: O(1) Complexity
+## 1. Custom Event Logic
 
-Standard arrays or single-linked lists require $O(N)$ time to find and remove a connection. This library uses a **Doubly Linked List**. Each `Connection` object stores `_prev` and `_next` references, allowing a connection to remove itself from the signal without any list traversal.
+While Roblox provides `RBXScriptSignal` for engine events, developers often need custom signals for game-specific logic (e.g., `OnInventoryUpdate`, `OnGameStateChanged`).
 
-```lua
--- Conceptual DLL disconnection
--- O(1) - immediate removal of node
-if prev then
-    prev._next = next
-else
-    signal._handlerListHead = next
-end
-if next then
-    next._prev = prev
-end
-```
+Signals allow you to:
+-   Fire events at will with any number of arguments.
+-   Maintain full control over the execution lifecycle.
 
-## 2. Resource Management: Coroutine Pooling
+## 2. Superior Type Safety
 
-Allocating a new thread for every event fire increases memory pressure and GC frequency. A module-level thread cache (`freeRunnerThread`) is maintained. Handlers are executed within a pooled thread that is yielded and reused.
+Standard event systems in Luau often return `any`, leading to potential runtime errors and lack of autocomplete. This Signal implementation uses **Variadic Generics**, ensuring your IDE knows exactly what data is being passed.
 
 ```lua
--- Coroutine reuse pattern
-local function handle()
-    while true do
-        handler_fn(coroutine.yield()) -- reuse thread
-    end
-end
-```
+local mySignal = Signal.new<boolean, string>()
 
-## 3. Type Safety: Variadic Generics
-
-The signal is built using Luau's variadic generics (`Signal<T...>`). This ensures that parameters passed to `Connect`, `Once`, `Fire`, and `FireDeferred` are statically verified.
-
-```lua
-local mySignal = Signal.new<string, number>()
-
-mySignal:Connect(function(msg, val)
-    -- IDE knows msg is string, val is number
+mySignal:Connect(function(success, message)
+    -- success is boolean, message is string
 end)
-
-mySignal:Fire("Hello", 100) -- OK
-mySignal:Fire(true, 10)     -- Static Type Error!
 ```
 
-## 4. Memory Safety
+## 3. Predictable Performance
 
-All internal references (`_fn`, `_signal`, `_next`, `_prev`) are explicitly set to `nil` when a connection is severed or a signal is destroyed. This prevents circular references and ensures that captured closures are correctly released.
+Native `BindableEvent` objects incur overhead due to data serialization and engine-level management. This Signal library operates entirely in pure Luau with:
+-   **O(1) Disconnect**: Even with thousands of connections, removing one is a constant-time operation.
+-   **Coroutine Reuse**: Minimizes thread allocation costs, making it suitable for high-frequency events (e.g., frame-by-frame updates).
 
-```lua
-function Connection:Disconnect()
-    self.Connected = false
-    -- Crucial for GC:
-    self._fn = nil
-    self._signal = nil
-end
-```
+## 4. Enhanced Utility
 
-## Summary
+Traditional signal systems often lack modern control features. This library provides built-in methods for complex scenarios:
+-   **WaitTimeout**: Prevents infinite yields by providing a timeout limit.
+-   **FireDeferred**: Executes at the end of the frame, preventing race conditions.
+-   **Destroy**: Ensures all resources are properly released, preventing memory leaks in long-running projects.
 
-This Signal implementation focuses on predictable algorithmic performance and robust memory management while providing full Luau type safety.
+## 5. Professional-Grade Reliability
+
+Explicit reference clearing and a strict metatable ensure that the library is both memory-safe and developer-friendly. It is designed to be the foundation of large-scale, high-performance Roblox frameworks.
+
+---
+
+For a deeper dive into the technical details, see the [Architecture Guide](Architecture.md).
