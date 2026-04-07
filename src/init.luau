@@ -5,18 +5,13 @@
 	An object representing a connection to a Signal. It allows the management of
 	a specific handler function, including disconnecting it from the signal.
 	
-	The connection uses a Doubly Linked List structure, ensuring that disconnection
-	is an O(1) operation.
-	
 	```lua
-	local connection = mySignal:Connect(function(arg1, arg2)
-		print(arg1, arg2)
+	local connection = mySignal:Connect(function(name, score)
+		print(name, score)
 	end)
-	
 	connection:Disconnect()
 	```
 ]=]
-
 export type Connection<T...> = {
 	Connected: boolean,
 	Disconnect: (self: Connection<T...>) -> (),
@@ -31,20 +26,14 @@ export type Connection<T...> = {
 	A high-performance Luau implementation of a signal object, designed for event-driven
 	communication with variadic generic support.
 	
-	Features include thread-safe execution, coroutine pooling for performance, and
-	automatic memory management through reference clearing.
-	
 	```lua
-	local mySignal = Signal.new<string, number>()
-	
-	mySignal:Connect(function(name, score)
-		print(name, score)
+	local onScoreUpdate = Signal.new<string, number>()
+	onScoreUpdate:Connect(function(player, score)
+		print(player, "now has", score, "points")
 	end)
-	
-	mySignal:Fire("Player1", 100)
+	onScoreUpdate:Fire("Alpha", 100)
 	```
 ]=]
-
 export type Signal<T...> = {
 	Connect: (self: Signal<T...>, fn: (T...) -> ()) -> Connection<T...>,
 	Once: (self: Signal<T...>, fn: (T...) -> ()) -> Connection<T...>,
@@ -67,7 +56,6 @@ local freeRunnerThread: thread? = nil
 	Acquires the currently idle runner thread or creates one to execute a handler.
 	@private
 ]=]
-
 local function acquireRunnerThreadAndCallEventHandler(fn: (...any) -> (), ...: any)
 	local acquiredRunnerThread: thread? = freeRunnerThread
 	freeRunnerThread = nil
@@ -79,7 +67,6 @@ end
 	The entry point for pooled runner threads. Loops infinitely, waiting for tasks via yield.
 	@private
 ]=]
-
 local function runEventHandlerInFreeThread()
 	while true do
 		acquireRunnerThreadAndCallEventHandler(coroutine.yield())
@@ -93,7 +80,6 @@ Connection.__index = Connection
 	Creates a new Connection instance.
 	@private
 ]=]
-
 function Connection.new<T...>(signal: Signal<T...>, fn: (T...) -> ()): Connection<T...>
 	return (
 		setmetatable({
@@ -110,10 +96,11 @@ end
 	@method Disconnect
 	Terminates the connection between the Signal and the handler.
 	
-	Once disconnected, the handler will no longer be invoked when the signal fires.
-	Internal references are cleared to facilitate immediate garbage collection.
+	```lua
+	local connection = mySignal:Connect(function() end)
+	connection:Disconnect()
+	```
 ]=]
-
 function Connection.Disconnect<T...>(self: Connection<T...>)
 	if not self.Connected then
 		return
@@ -160,9 +147,12 @@ Signal.__index = Signal
 	@static .new
 	Constructs a new Signal object.
 	
+	```lua
+	local mySignal = Signal.new<string, boolean>()
+	```
+	
 	@return Signal<T...>
 ]=]
-
 function Signal.new<T...>(): Signal<T...>
 	return (
 		setmetatable({
@@ -176,10 +166,15 @@ end
 	@method Connect
 	Connects a handler function to the signal. Returns a Connection object.
 	
-	@param fn (...any) -> () -- The handler function to connect.
+	```lua
+	local connection = onPlayerAdded:Connect(function(player)
+		print(player.Name, "joined!")
+	end)
+	```
+	
+	@param fn (T...) -> () -- The handler function to connect.
 	@return Connection<T...>
 ]=]
-
 function Signal.Connect<T...>(self: Signal<T...>, fn: (T...) -> ()): Connection<T...>
 	if self._destroyed then
 		error("Cannot connect to a destroyed signal", 2)
@@ -198,8 +193,11 @@ end
 --[=[
 	@method DisconnectAll
 	Disconnects all currently active connections from the signal.
+	
+	```lua
+	mySignal:DisconnectAll()
+	```
 ]=]
-
 function Signal.DisconnectAll<T...>(self: Signal<T...>)
 	local item: Connection<T...>? = self._handlerListHead
 	while item do
@@ -217,11 +215,13 @@ end
 --[=[
 	@method Fire
 	Invokes all connected handlers immediately with the provided arguments.
-	Execution is performed within a pooled coroutine for optimized performance.
+	
+	```lua
+	mySignal:Fire("Alpha", 100)
+	```
 	
 	@param ... T... -- The arguments to pass to the handlers.
 ]=]
-
 function Signal.Fire<T...>(self: Signal<T...>, ...: T...)
 	if self._destroyed then
 		return
@@ -249,11 +249,13 @@ end
 --[=[
 	@method FireDeferred
 	Queues all connected handlers to be executed at the end of the frame.
-	This follows the modern Roblox 'Deferred' signal behavior.
+	
+	```lua
+	mySignal:FireDeferred("Beta", 200)
+	```
 	
 	@param ... T... -- The arguments to pass to the handlers.
 ]=]
-
 function Signal.FireDeferred<T...>(self: Signal<T...>, ...: T...)
 	if self._destroyed then
 		return
@@ -271,12 +273,18 @@ end
 
 --[=[
 	@method Wait
-	Yields the current thread until the signal is fired. Returns the fired arguments.
+	Yields the current thread until the signal is fired.
+	
+	```lua
+	task.spawn(function()
+		local name, score = mySignal:Wait()
+		print(name, "fired with", score)
+	end)
+	```
 	
 	@yields
 	@return T...
 ]=]
-
 function Signal.Wait<T...>(self: Signal<T...>): T...
 	if self._destroyed then
 		error("Cannot wait on a destroyed signal", 2)
@@ -293,14 +301,23 @@ end
 
 --[=[
 	@method WaitTimeout
-	Yields the current thread until the signal is fired or the a timeout occurs.
-	Returns nil if the signal times out.
+	Yields the current thread until the signal is fired or a timeout occurs.
+	
+	```lua
+	task.spawn(function()
+		local success, message = mySignal:WaitTimeout(5)
+		if success then
+			print("Received:", message)
+		else
+			warn("Wait timed out!")
+		end
+	end)
+	```
 	
 	@param timeout number -- Maximum time to wait in seconds.
 	@yields
 	@return T...
 ]=]
-
 function Signal.WaitTimeout<T...>(self: Signal<T...>, timeout: number): T...
 	if self._destroyed then
 		error("Cannot wait on a destroyed signal", 2)
@@ -330,12 +347,17 @@ end
 
 --[=[
 	@method Once
-	Connects a handler to be executed only once. Automatically disconnects after firing.
+	Connects a handler to be executed only once.
 	
-	@param fn (...any) -> () -- The handler function.
+	```lua
+	mySignal:Once(function()
+		print("This runs only for the first occurrence.")
+	end)
+	```
+	
+	@param fn (T...) -> () -- The handler function.
 	@return Connection<T...>
 ]=]
-
 function Signal.Once<T...>(self: Signal<T...>, fn: (T...) -> ()): Connection<T...>
 	if self._destroyed then
 		error("Cannot connect to a destroyed signal", 2)
@@ -353,11 +375,14 @@ end
 
 --[=[
 	@method GetConnectionCount
-	Returns the total number of active connections to the signal.
+	Returns the total number of active connections.
+	
+	```lua
+	print("Active listeners:", mySignal:GetConnectionCount())
+	```
 	
 	@return number
 ]=]
-
 function Signal.GetConnectionCount<T...>(self: Signal<T...>): number
 	local count: number = 0
 	local item: Connection<T...>? = self._handlerListHead
@@ -374,9 +399,12 @@ end
 	@method IsDestroyed
 	Checks whether the signal object has been destroyed.
 	
+	```lua
+	if mySignal:IsDestroyed() then return end
+	```
+	
 	@return boolean
 ]=]
-
 function Signal.IsDestroyed<T...>(self: Signal<T...>): boolean
 	return self._destroyed
 end
@@ -384,9 +412,11 @@ end
 --[=[
 	@method Destroy
 	Permanently destroys the signal object and disconnects all handlers.
-	Once destroyed, the signal cannot be reused.
+	
+	```lua
+	mySignal:Destroy()
+	```
 ]=]
-
 function Signal.Destroy<T...>(self: Signal<T...>)
 	if self._destroyed then
 		return
