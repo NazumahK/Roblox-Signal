@@ -60,7 +60,11 @@ local function acquireRunnerThreadAndCallEventHandler(fn: (...any) -> (), ...: a
 	local acquiredRunnerThread: thread? = freeRunnerThread
 	freeRunnerThread = nil
 	fn(...)
-	freeRunnerThread = acquiredRunnerThread
+	-- Only restore the runner thread if freeRunnerThread hasn't been claimed
+	-- by a nested Fire() call during fn(...).
+	if freeRunnerThread == nil then
+		freeRunnerThread = acquiredRunnerThread
+	end
 end
 
 --[=[
@@ -131,8 +135,17 @@ function Connection.Disconnect<T...>(self: Connection<T...>)
 end
 
 -- Make Connection strict
+-- Internal fields that can be nil must be whitelisted, because Lua treats
+-- { key = nil } as absent.  Instance lookup falls through __index = Connection
+-- → Connection's metatable __index → error, unless we allow known fields.
+local CONNECTION_FIELDS = table.freeze({
+	Connected = true, _signal = true, _fn = true, _next = true, _prev = true,
+})
 setmetatable(Connection, {
 	__index = function(_, key)
+		if CONNECTION_FIELDS[key] then
+			return nil
+		end
 		error(("Attempt to get Connection::%s (not a valid member)"):format(tostring(key)), 2)
 	end,
 	__newindex = function(_, key, _)
@@ -234,10 +247,10 @@ function Signal.Fire<T...>(self: Signal<T...>, ...: T...)
 		if item.Connected and fn then
 			local runner: thread? = freeRunnerThread
 			if runner then
+				freeRunnerThread = nil
 				task.spawn(runner, fn, ...)
 			else
 				local newRunner: thread = coroutine.create(runEventHandlerInFreeThread)
-				freeRunnerThread = newRunner
 				coroutine.resume(newRunner)
 				task.spawn(newRunner, fn, ...)
 			end
@@ -427,8 +440,12 @@ function Signal.Destroy<T...>(self: Signal<T...>)
 end
 
 -- Make signal strict
+local SIGNAL_FIELDS = table.freeze({ _handlerListHead = true, _destroyed = true })
 setmetatable(Signal, {
 	__index = function(_, key)
+		if SIGNAL_FIELDS[key] then
+			return nil
+		end
 		error(("Attempt to get Signal::%s (not a valid member)"):format(tostring(key)), 2)
 	end,
 	__newindex = function(_, key, _)
